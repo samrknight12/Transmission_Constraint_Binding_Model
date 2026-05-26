@@ -1,0 +1,12 @@
+{
+  "top_k": 20,
+  "top_k_precision": 0.2486,
+  "median_brier": 0.0384,
+  "median_prod_pr_auc": 0.8027,
+  "median_marg_pr_auc": 0.5514,
+  "median_ece_production": 0.0863,
+  "n_production": 51,
+  "n_marginal": 21,
+  "n_needs_calibration": 32,
+  "n_evaluated": 72
+}

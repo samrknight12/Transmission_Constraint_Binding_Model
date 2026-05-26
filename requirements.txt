@@ -1,0 +1,27 @@
+# Core data
+numpy>=1.26
+pandas>=2.2
+pyarrow>=15.0          # parquet read/write
+
+# Machine learning
+xgboost>=2.0
+scikit-learn>=1.4
+imbalanced-learn>=0.12
+
+# Hyperparameter tuning
+optuna>=3.6
+
+# Explainability
+shap>=0.45
+
+# Model persistence
+joblib>=1.4
+
+# Visualisation
+matplotlib>=3.8
+
+# Data download (scripts/download_miso_data.py)
+requests>=2.31
+
+# Optional — GPU device info in scripts/check_gpu.py
+# torch>=2.2          # uncomment if CUDA toolkit is installed

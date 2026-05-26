@@ -1,0 +1,122 @@
+======================================================================
+REGIME CHECK — Monthly Binding Analysis
+======================================================================
+
+Flowgate: TURKEY_HL-HILG FLO PRAIRIEST-WMTVERNON
+Safe ID : TURKEY_HL-HILG_FLO_PRAIRIEST-WMTVERNON
+
+  Monthly binding (2023-2024):
+    Jan 2023:   74 hrs  rate=10.01%
+    Feb 2023:   37 hrs  rate= 5.51%
+    Mar 2023:  251 hrs  rate=33.74%
+    Apr 2023:  328 hrs  rate=45.56%
+    May 2023:  152 hrs  rate=20.43%
+    Jun 2023:   35 hrs  rate= 4.86%
+    Jul 2023:   17 hrs  rate= 2.28%
+    Aug 2023:    0 hrs  rate= 0.00%
+    Sep 2023:  117 hrs  rate=16.25%
+    Oct 2023:  211 hrs  rate=28.36%
+    Nov 2023:  349 hrs  rate=48.47%
+    Dec 2023:   85 hrs  rate=11.42%
+    Jan 2024:    0 hrs  rate= 0.00%
+    Feb 2024:   24 hrs  rate= 3.45%
+    Mar 2024:    0 hrs  rate= 0.00%
+    Apr 2024:    0 hrs  rate= 0.00%
+    May 2024:    0 hrs  rate= 0.00%
+    Jun 2024:    3 hrs  rate= 0.42%
+    Jul 2024:    0 hrs  rate= 0.00%
+    Aug 2024:    0 hrs  rate= 0.00% <-- VAL
+    Sep 2024:    0 hrs  rate= 0.00% <-- VAL
+    Oct 2024:    3 hrs  rate= 0.40% <-- VAL
+    Nov 2024:    0 hrs  rate= 0.00%
+    Dec 2024:    0 hrs  rate= 0.00%
+
+  Topology note:
+    Bus pair: TURKEY HILL – HILGER (likely SE Minnesota or N Iowa region).
+    Monitor: PRAIRIE STREET – WMTVERNON (WMTVERNON = West Mt Vernon).
+    No apparent token overlap with MORRISOT or CHAR_CK..
+
+Flowgate: MORRISOT-GRANTCO FLO HANK-WAP+WAP TR2
+Safe ID : MORRISOT-GRANTCO_FLO_HANK-WAP+WAP_TR2
+
+  Monthly binding (2023-2024):
+    Jan 2023:    0 hrs  rate= 0.00%
+    Feb 2023:   36 hrs  rate= 5.36%
+    Mar 2023:    0 hrs  rate= 0.00%
+    Apr 2023:  529 hrs  rate=73.47%
+    May 2023:  148 hrs  rate=19.89%
+    Jun 2023:   58 hrs  rate= 8.06%
+    Jul 2023:   53 hrs  rate= 7.12%
+    Aug 2023:  234 hrs  rate=31.45%
+    Sep 2023:  387 hrs  rate=53.75%
+    Oct 2023:  413 hrs  rate=55.51%
+    Nov 2023:  335 hrs  rate=46.53%
+    Dec 2023:  260 hrs  rate=34.95%
+    Jan 2024:   66 hrs  rate= 8.87%
+    Feb 2024:   34 hrs  rate= 4.89%
+    Mar 2024:    0 hrs  rate= 0.00%
+    Apr 2024:    0 hrs  rate= 0.00%
+    May 2024:    0 hrs  rate= 0.00%
+    Jun 2024:   17 hrs  rate= 2.36%
+    Jul 2024:    0 hrs  rate= 0.00%
+    Aug 2024:    0 hrs  rate= 0.00% <-- VAL
+    Sep 2024:    0 hrs  rate= 0.00% <-- VAL
+    Oct 2024:    0 hrs  rate= 0.00% <-- VAL
+    Nov 2024:   33 hrs  rate= 4.58%
+    Dec 2024:    0 hrs  rate= 0.00%
+
+  Topology note:
+    Bus pair: MORRISON TWP – GRANT CO (W Minnesota / E South Dakota region).
+    Monitor: HANKINSON – WAHPETON + WAHPETON TR2.
+    HANK-WAP corridor appears in ELLIOTW-ENDERLNW FLO HANK-WAHP+WAHP T2 as well — shares the same Hankinson-Wahpeton 115 kV interface.
+    No direct token overlap with TURKEY_HL or CHAR_CK..
+
+Flowgate: CHAR_CK-WATFORD FLO PATINGATE-CHARLIE CK
+Safe ID : CHAR_CK-WATFORD_FLO_PATINGATE-CHARLIE_CK
+
+  Monthly binding (2023-2024):
+    Jan 2023:  105 hrs  rate=14.21%
+    Feb 2023:   47 hrs  rate= 6.99%
+    Mar 2023:  175 hrs  rate=23.52%
+    Apr 2023:  551 hrs  rate=76.53%
+    May 2023:  309 hrs  rate=41.53%
+    Jun 2023:  186 hrs  rate=25.83%
+    Jul 2023:  552 hrs  rate=74.19%
+    Aug 2023:  724 hrs  rate=97.31%
+    Sep 2023:  720 hrs  rate=100.00%
+    Oct 2023:  736 hrs  rate=98.92%
+    Nov 2023:  524 hrs  rate=72.78%
+    Dec 2023:  517 hrs  rate=69.49%
+    Jan 2024:  378 hrs  rate=50.81%
+    Feb 2024:  435 hrs  rate=62.50%
+    Mar 2024:    5 hrs  rate= 0.67%
+    Apr 2024:    0 hrs  rate= 0.00%
+    May 2024:    0 hrs  rate= 0.00%
+    Jun 2024:    0 hrs  rate= 0.00%
+    Jul 2024:    0 hrs  rate= 0.00%
+    Aug 2024:    0 hrs  rate= 0.00% <-- VAL
+    Sep 2024:    0 hrs  rate= 0.00% <-- VAL
+    Oct 2024:  141 hrs  rate=18.95% <-- VAL
+    Nov 2024:    0 hrs  rate= 0.00%
+    Dec 2024:    0 hrs  rate= 0.00%
+
+  Topology note:
+    Bus pair: CHARLIE CREEK – WATFORD CITY (W North Dakota Bakken oil patch).
+    Monitor: PATINGATE – CHARLIE CREEK.
+    Self-monitoring flowgate (CHAR_CK on both sides).
+    Heavily influenced by oil-field load; binding driven by local load growth, not shared corridor with TURKEY_HL or MORRISOT..
+
+
+----------------------------------------------------------------------
+TOPOLOGY / CORRIDOR ANALYSIS
+----------------------------------------------------------------------
+
+Topology conclusion: no shared upstream substation or corridor detected from MISO naming.
+  TURKEY_HL-HILG  : SE Minnesota/N Iowa region
+  MORRISOT-GRANTCO: W Minnesota/E South Dakota, shares HANK-WAP interface with
+                    ELLIOTW-ENDERLNW (also zero-val), suggesting a regional
+                    Hankinson-Wahpeton constraint family that binds outside Jul-Sep.
+  CHAR_CK-WATFORD : W North Dakota Bakken region, self-monitoring, load-driven.
+All three are geographically distinct — a common topology change is unlikely.
+The shared zero-val outcome is more consistent with independent seasonal patterns
+(summer inactivity) than a single upstream network event.
