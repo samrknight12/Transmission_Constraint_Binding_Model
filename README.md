@@ -88,18 +88,32 @@ src/
     train.py                # train_flowgate(): Optuna + XGBoost, per-fold scale_pos_weight
   evaluation/
     evaluate.py             # PR-AUC, precision-recall curve, SHAP feature importance
+    test_evaluation.py      # Held-out test set evaluation, calibration check, aggregate metrics
+    generate_layer1_summary.py  # Produces data/results/layer1_summary.md
   validation/
-    sanity_check.py         # 6 PASS/FAIL checks on master_dataset.parquet
+    sanity_check.py         # PASS/FAIL checks on master_dataset.parquet
+
+scripts/
+  retrain_seasonal_features.py  # Retrains zero-val flowgates with 2 seasonal features
+  regime_check.py               # Monthly binding plots for regime-change investigation
 
 data/
   raw/                      # Source files (not committed)
   processed/
     master_dataset.parquet  # Full stacked feature matrix
-    features/               # Per-flowgate parquets
-    target_flowgates.csv    # 110 qualifying flowgates with binding rates and tiers
+    features/               # Per-flowgate parquets (109 flowgates)
+    target_flowgates.csv    # 103 active flowgates (6 dropped as insufficient_signal)
+  results/
+    training_results.csv    # Per-flowgate training results + model_status + tier
+    test_evaluation.csv     # Per-flowgate held-out test metrics and calibration status
+    aggregate_metrics.json  # System-level aggregates (top-K precision, medians)
+    layer1_summary.md       # Full Layer 1 results report
 
 models/
-  saved/                    # Trained .joblib artifacts
+  saved/                    # Trained .joblib artifacts; *_calibrated.joblib for ECE > 0.05
+
+notebooks/
+  outputs/regime_check/     # Monthly binding plots for regime-change flowgates
 
 docs/
   DATA_SOURCES.md           # Raw data sources, loaders, format notes
@@ -108,36 +122,70 @@ docs/
 
 ---
 
+## Layer 1 Results
+
+Full results: **[data/results/layer1_summary.md](data/results/layer1_summary.md)**
+
+109 flowgates trained (103 active, 6 dropped as `insufficient_signal`). 72 models
+evaluated on the held-out Oct–Dec 2024 test set.
+
+| Metric | Value |
+|---|---|
+| Production models (val PR-AUC >= 0.70) | 51 |
+| Marginal models (val PR-AUC 0.40-0.69) | 21 |
+| Median test PR-AUC — production | 0.8027 |
+| Median test PR-AUC — marginal | 0.5514 |
+| Top-20 hourly precision | 24.9% |
+| Median Brier score | 0.0384 |
+| Models requiring calibration (ECE > 0.05) | 32 / 51 |
+
+**Tier breakdown** (models with >= 1 test binding hour):
+
+| Tier | Count | Median test PR-AUC |
+|---|---|---|
+| high_signal | 21 | 0.8339 |
+| low_signal | 24 | 0.7905 |
+| synthetic_only | 18 | 0.6210 |
+
+4 flowgates confirmed as regime-change (network reconfiguration Q1 2024; excluded from
+test evaluation). 18 zero-val flowgates retrained with seasonal features
+(`binding_rate_same_month_prior_year`, `days_since_last_binding_rolling_14d`).
+
+---
+
 ## Current Progress
 
 | Stage | Status |
 |---|---|
 | Data ingestion (`src/data/loaders.py`) | Complete |
-| Feature engineering (`src/features/`) | Complete — 60 features, 5 groups |
-| Master dataset build (`build_master_dataset.py`) | Complete — 110 flowgates, 0 NaN |
+| Feature engineering (`src/features/`) | Complete — 59 features, 5 groups |
+| Master dataset build (`build_master_dataset.py`) | Complete — 109 flowgates, 0 NaN |
 | Leakage guards | Complete — shift(1) verified, corr gate, leakage assertions |
-| Sanity checks (`sanity_check.py`) | Complete — 11/13 checks pass (2 by-design) |
+| Sanity checks (`sanity_check.py`) | Complete — 11/13 pass (2 by-design) |
 | Flowgate quality tiers | Complete — synthetic_only / low_signal / high_signal |
-| Training pipeline (`train.py`) | Complete — Optuna tuning, per-fold scale_pos_weight, tier-based feature selection |
-| Model evaluation (`evaluate.py`) | Scaffolded — PR-AUC, PR curve, SHAP |
-| Model training (running fits) | Not started |
-| Backtesting / FTR strategy layer | Not started |
+| Training pipeline (`train.py`) | Complete — Optuna, per-fold scale_pos_weight, tier-based feature selection |
+| Layer 1 model training | Complete — 103 active flowgates trained |
+| Seasonal feature retraining | Complete — 18 zero-val flowgates retrained with 2 seasonal features |
+| Regime change analysis | Complete — 4 flowgates confirmed, monthly binding plots saved |
+| Test set evaluation (`test_evaluation.py`) | Complete — per-flowgate metrics, calibration check |
+| Calibration | Complete — isotonic recalibration for 32 production models; `*_calibrated.joblib` saved |
+| Layer 1 summary | Complete — `data/results/layer1_summary.md` |
+| Layer 2 (signal aggregation / ensemble) | Not started |
+| Layer 3 (FTR strategy / backtesting) | Not started |
 
-The two sanity check failures are expected by design:
+Sanity check failures are expected by design:
 
-- **Check 2** (class imbalance 10-35:1): High-activity flowgates like CHAR_CK
-  bind >20% of hours; their imbalance ratio falls below 10:1. The "none"
-  class-weight strategy handles these.
-- **Check 6** (observed loading rate 3-10%): 29 flowgates have zero RT loading
-  observations (synthetic_only tier); 44 have sparse coverage (low_signal tier).
-  The tier system was built specifically to handle these cases.
+- **Class imbalance check**: High-activity flowgates (e.g. CHAR_CK, >20% binding) fall
+  below the 10:1 target ratio. The `none` class-weight strategy handles these correctly.
+- **Observed loading rate**: 29 synthetic_only flowgates have zero RT loading observations;
+  44 low_signal flowgates have sparse coverage. The tier system was built for this.
 
 ---
 
 ## Key Commands
 
 ```bash
-# Build master dataset (all 110 flowgates)
+# Build master dataset
 py -3 src/features/build_master_dataset.py
 
 # Run sanity checks on master dataset
@@ -148,10 +196,18 @@ py -3 src/models/train.py \
     --flowgate "LAKEFIELD.LAKFIELD 345 KV" \
     --features-path data/processed/features/LAKEFIELD_LAKFIELD_345_KV.parquet
 
-# Evaluate a trained model
-py -3 src/evaluation/evaluate.py \
-    --model-path models/saved/LAKEFIELD_LAKFIELD_345_KV.joblib \
-    --features-path data/processed/features/LAKEFIELD_LAKFIELD_345_KV.parquet
+# Retrain zero-val flowgates with seasonal features (n_trials=75)
+py -3 scripts/retrain_seasonal_features.py
+py -3 scripts/retrain_seasonal_features.py --min-cv 0.50 --n-trials 100
+
+# Run held-out test evaluation + calibration check
+py -3 src/evaluation/test_evaluation.py
+
+# Generate Layer 1 summary report (run test_evaluation.py first)
+py -3 src/evaluation/generate_layer1_summary.py
+
+# Monthly binding plots for regime-change investigation
+py -3 scripts/regime_check.py
 
 # Run tests
 pytest tests/ -v
