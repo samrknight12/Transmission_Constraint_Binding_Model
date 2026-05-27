@@ -90,6 +90,8 @@ src/
     evaluate.py             # PR-AUC, precision-recall curve, SHAP feature importance
     test_evaluation.py      # Held-out test set evaluation, calibration check, aggregate metrics
     generate_layer1_summary.py  # Produces data/results/layer1_summary.md
+  explainability/
+    shap_explainer.py       # TreeSHAP drivers, per-hour narratives, daily market summary
   validation/
     sanity_check.py         # PASS/FAIL checks on master_dataset.parquet
 
@@ -108,9 +110,12 @@ data/
     test_evaluation.csv     # Per-flowgate held-out test metrics and calibration status
     aggregate_metrics.json  # System-level aggregates (top-K precision, medians)
     layer1_summary.md       # Full Layer 1 results report
+    daily_explanations/     # Per-day CSVs from explain_day() with market summary header
 
 models/
   saved/                    # Trained .joblib artifacts; *_calibrated.joblib for ECE > 0.05
+  shap/
+    global/                 # Per-flowgate mean |SHAP| importance CSVs (51 production models)
 
 notebooks/
   outputs/regime_check/     # Monthly binding plots for regime-change flowgates
@@ -153,6 +158,63 @@ test evaluation). 18 zero-val flowgates retrained with seasonal features
 
 ---
 
+## Explainability
+
+`src/explainability/shap_explainer.py` provides four levels of model explanation for
+production models, using XGBoost's native `pred_contribs` (TreeSHAP) to avoid library
+version incompatibilities.
+
+**Global importance** (`run_global_importance_all`) — mean |SHAP| per feature across
+the full Oct–Dec 2024 test set, saved per flowgate to `models/shap/global/`. The most
+dominant feature across 50 of 51 production models is `flowgate_hours_since_binding`.
+
+**Single-hour explanation** (`explain_prediction(flowgate_id, datetime_utc)`) — returns
+predicted probability (calibrated where available), top drivers with SHAP value and
+human-readable value context, historical base rate, and direction vs base rate.
+
+**Trader narrative** (`generate_narrative(flowgate_id, datetime_utc)`) — plain-English
+3-sentence output with no ML terminology. Binding-history features
+(`hours_since_last_binding`, `binding_freq_trailing_7d/30d`) are intentionally suppressed
+from the narrative text (they drive the model but are not actionable for a trader);
+if all top drivers are excluded, a generic "recent binding activity" fallback fires.
+
+**Daily batch** (`explain_day(date, top_n_flowgates=10)`) — runs every production model
+across all hours of a given day, filters to above-threshold predictions, keeps top-N
+per hour, deduplicates consecutive hours where a flowgate holds identical probability
+for 3+ hours (synthetic loading proxy signal), and generates a market summary. Returns
+`(DataFrame, summary_str)` and saves to `data/results/daily_explanations/{date}.csv`
+with the summary as a leading comment row.
+
+```
+# October 15 congestion summary: 8 constraints flagged above threshold.
+# Loading vs 30-day max is the dominant driver across LIMECK-BARTON and
+# FARGO-SHEYN (+3 others). Wind ramp rate also contributes across 4 constraints.
+# MUDLAKE-VERONA 1 remains elevated across 6 output rows driven by solar
+# generation forecast.
+datetime,flowgate_id,probability,narrative
+01:00-05:00 UTC,LIMECK-BARTON FLO KILLDEER-QUINN,0.731,...[5hrs collapsed]
+2024-10-15 02:00+00:00,FARGO-SHEYN FLO CTR-JAMESTOWN 345,0.931,...
+03:00-10:00 UTC,ASTORIA TR1_TR11 FLO BRKINGS CNTY-ASTRIA,0.826,...[8hrs collapsed]
+```
+
+Example narrative (Oct 15 14:00 UTC, MUDLAKE-VERONA 1):
+> *At 14:00 UTC on 2024-10-15, MUDLAKE-VERONA 1 FLO MUDLAKE-VERONA 2 has a 95%
+> binding probability -- 91 percentage points above its historical base rate of 4%.
+> Solar generation forecast (3,647 MW -- 279% above avg) is the primary driver,
+> pushing probability upward; followed by solar ramp rate (+1,492 MW) pulling
+> downward. Additionally, wind forecast error (+4,134 MW) contributes to suppressed
+> risk.*
+
+**Design notes:**
+- Probabilities clipped to `(0.001, 0.999)` at both the base model and calibrator
+  output — isotonic regression can otherwise saturate at exactly 1.0
+- Binding-history features are excluded from narrative text but remain in the model;
+  the suppression list is `EXCLUDED_FROM_NARRATIVE` in `shap_explainer.py`
+- Consecutive-run collapse threshold is 3+ hours at identical probability (3 dp);
+  tagged `[synthetic loading proxy active]` in the narrative
+
+---
+
 ## Current Progress
 
 | Stage | Status |
@@ -170,6 +232,7 @@ test evaluation). 18 zero-val flowgates retrained with seasonal features
 | Test set evaluation (`test_evaluation.py`) | Complete — per-flowgate metrics, calibration check |
 | Calibration | Complete — isotonic recalibration for 32 production models; `*_calibrated.joblib` saved |
 | Layer 1 summary | Complete — `data/results/layer1_summary.md` |
+| Explainability (`shap_explainer.py`) | Complete — global importance, per-hour narratives, daily market summary |
 | Layer 2 (signal aggregation / ensemble) | Not started |
 | Layer 3 (FTR strategy / backtesting) | Not started |
 
@@ -208,6 +271,19 @@ py -3 src/evaluation/generate_layer1_summary.py
 
 # Monthly binding plots for regime-change investigation
 py -3 scripts/regime_check.py
+
+# Compute global SHAP importance for all 51 production models
+py -3 src/explainability/shap_explainer.py
+
+# Run daily explanation for a specific date
+py -3 src/explainability/shap_explainer.py --day 2024-10-15
+
+# Use explainability API directly
+python -c "
+from src.explainability.shap_explainer import explain_prediction, generate_narrative, explain_day
+print(generate_narrative('FARGO-SHEYN FLO CTR-JAMESTOWN 345', '2024-10-15 05:00'))
+result, summary = explain_day('2024-10-15', top_n_flowgates=10)
+"
 
 # Run tests
 pytest tests/ -v
