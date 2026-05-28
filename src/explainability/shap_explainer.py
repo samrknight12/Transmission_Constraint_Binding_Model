@@ -76,6 +76,41 @@ def _is_excluded_from_narrative(driver: dict) -> bool:
     return any(p in feat for p in _NARRATIVE_EXCLUDE_PATTERNS)
 
 
+# ── Calendar feature suppression ─────────────────────────────────────────────────
+
+# Calendar / encoded features that should never appear with raw numeric values
+# in narrative text. If one is the top driver, it is replaced with the generic
+# phrase "seasonal and time-of-day patterns". Subsequent calendar drivers are
+# silently skipped so the next actionable driver takes their slot.
+SUPPRESS_FROM_NARRATIVE: list[str] = [
+    "day_of_week", "month_of_year", "month",
+    "hour_sin", "hour_cos", "season",
+    "is_weekend", "is_holiday",
+]
+
+_CALENDAR_FEATURE_NAMES: frozenset[str] = frozenset({
+    "hour_of_day", "hour_sin", "hour_cos",
+    "day_of_week", "dow_sin", "dow_cos",
+    "month", "month_sin", "month_cos",
+    "season",
+    "is_weekend", "is_nerc_holiday",
+    "is_peak_hour", "is_shoulder_hour", "is_peak_period",
+})
+
+_CALENDAR_LABELS: frozenset[str] = frozenset({
+    "time of day", "day of week", "month of year",
+    "season", "weekend flag", "NERC holiday",
+    "peak period", "shoulder period",
+})
+
+
+def _is_calendar_driver(driver: dict) -> bool:
+    return (
+        driver["feature_name"] in _CALENDAR_FEATURE_NAMES
+        or driver["label"] in _CALENDAR_LABELS
+    )
+
+
 # ── Feature label mapping ────────────────────────────────────────────────────────
 
 _FEATURE_LABELS: dict[str, str] = {
@@ -366,6 +401,45 @@ def _value_context(feature: str, value: float, df_full: pd.DataFrame) -> str:
     return f"{value:.3g}"
 
 
+_DIRECTION_WARNINGS_CSV = RESULTS_DIR / "shap_direction_warnings.csv"
+_DIRECTION_WARNING_COLS = [
+    "logged_utc", "flowgate_id", "datetime_utc",
+    "predicted_probability", "top_feature", "shap_value",
+    "feature_value", "col_mean", "col_std",
+]
+
+
+def _log_direction_warning(
+    flowgate_id: str,
+    ts: pd.Timestamp,
+    prob: float,
+    top_driver: dict,
+    col_mean: float,
+    col_std: float,
+) -> None:
+    import csv
+    from datetime import datetime, timezone
+
+    row = {
+        "logged_utc":            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "flowgate_id":           flowgate_id,
+        "datetime_utc":          str(ts),
+        "predicted_probability": f"{prob:.4f}",
+        "top_feature":           top_driver["feature_name"],
+        "shap_value":            f"{top_driver['shap_value']:.4f}",
+        "feature_value":         f"{top_driver['feature_value']:.4f}",
+        "col_mean":              f"{col_mean:.4f}",
+        "col_std":               f"{col_std:.4f}",
+    }
+    _DIRECTION_WARNINGS_CSV.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not _DIRECTION_WARNINGS_CSV.exists()
+    with open(_DIRECTION_WARNINGS_CSV, "a", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=_DIRECTION_WARNING_COLS, lineterminator="\n")
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+
+
 def explain_prediction(flowgate_id: str, datetime_utc: str | pd.Timestamp) -> dict:
     """
     Explain the model prediction for a single flowgate-hour.
@@ -375,10 +449,14 @@ def explain_prediction(flowgate_id: str, datetime_utc: str | pd.Timestamp) -> di
           predicted_probability: float,
           top_drivers: [
               {feature_name, label, shap_value, feature_value, feature_value_context},
-              ...  (up to 5, sorted by |shap_value| desc)
+              ...  (up to 8, sorted by |shap_value| desc, deduped by label)
           ],
           binding_base_rate: float,
           prediction_context: "above_base" | "below_base",
+          direction_suspect: bool,  -- True when top SHAP driver is "downward" yet
+                                       prob > 0.85 and the feature is well above average;
+                                       indicates a non-linear interaction the narrative
+                                       may be misrepresenting
         }
     """
     ts = pd.Timestamp(datetime_utc, tz="UTC") if not isinstance(datetime_utc, pd.Timestamp) else datetime_utc
@@ -425,20 +503,39 @@ def explain_prediction(flowgate_id: str, datetime_utc: str | pd.Timestamp) -> di
         seen_labels.add(lbl)
         feat_val = float(row.iloc[0][feat])
         top_drivers.append({
-            "feature_name":         feat,
-            "label":                lbl,
-            "shap_value":           float(sv[idx]),
-            "feature_value":        feat_val,
+            "feature_name":          feat,
+            "label":                 lbl,
+            "shap_value":            float(sv[idx]),
+            "feature_value":         feat_val,
             "feature_value_context": _value_context(feat, feat_val, df_full),
         })
         if len(top_drivers) == 8:
             break
+
+    # Direction-suspect check: high-confidence prediction (>0.85) where the top
+    # SHAP driver points downward yet the feature value is substantially above
+    # its historical mean. This indicates a non-linear interaction at a boundary
+    # where the local SHAP gradient reverses — the narrative direction word would
+    # be misleading. Log for review; generate_narrative() swaps the direction word.
+    direction_suspect = False
+    if prob > 0.85 and top_drivers and top_drivers[0]["shap_value"] < 0:
+        td = top_drivers[0]
+        feat = td["feature_name"]
+        val  = td["feature_value"]
+        if feat in df_full.columns:
+            col_mean = float(df_full[feat].mean())
+            col_std  = float(df_full[feat].std())
+            threshold = col_mean + max(col_std, abs(col_mean) * 0.5)
+            if col_std > 0 and val > threshold:
+                direction_suspect = True
+                _log_direction_warning(flowgate_id, ts, prob, td, col_mean, col_std)
 
     return {
         "predicted_probability": prob,
         "top_drivers":           top_drivers,
         "binding_base_rate":     base_rate,
         "prediction_context":    "above_base" if prob > base_rate else "below_base",
+        "direction_suspect":     direction_suspect,
     }
 
 
@@ -452,10 +549,11 @@ def generate_narrative(flowgate_id: str, datetime_utc: str | pd.Timestamp) -> st
     ts  = pd.Timestamp(datetime_utc, tz="UTC") if not isinstance(datetime_utc, pd.Timestamp) else datetime_utc
     exp = explain_prediction(flowgate_id, ts)
 
-    prob      = exp["predicted_probability"]
-    base_rate = exp["binding_base_rate"]
-    context   = exp["prediction_context"]
-    drivers   = exp["top_drivers"]
+    prob             = exp["predicted_probability"]
+    base_rate        = exp["binding_base_rate"]
+    context          = exp["prediction_context"]
+    drivers          = exp["top_drivers"]
+    direction_suspect = exp["direction_suspect"]
 
     prob_pct  = prob * 100
     base_pct  = base_rate * 100
@@ -478,22 +576,52 @@ def generate_narrative(flowgate_id: str, datetime_utc: str | pd.Timestamp) -> st
             f"{base_pct:.0f}%."
         )
 
-    # Filter out excluded features before building sentences.
-    # Exception: if every returned driver is excluded, fall back to a generic
-    # "recent binding activity" phrase so the narrative is never fully empty.
+    # Filter out binding-history features — real signal but not actionable for traders.
+    # Exception: if every driver is excluded, fall back to a generic phrase.
     narrative_drivers = [d for d in drivers if not _is_excluded_from_narrative(d)]
     all_excluded_fallback = len(narrative_drivers) == 0
 
-    d1 = narrative_drivers[0] if len(narrative_drivers) > 0 else None
-    d2 = narrative_drivers[1] if len(narrative_drivers) > 1 else None
-    d3 = narrative_drivers[2] if len(narrative_drivers) > 2 else None
+    # Further partition: calendar features (encoded cyclics) are also not readable
+    # in raw form. Track whether the top narrative driver is a calendar feature so
+    # we can substitute "seasonal and time-of-day patterns" as the primary phrase
+    # and skip to the next actionable driver for context sentences.
+    calendar_was_top = (
+        not all_excluded_fallback
+        and len(narrative_drivers) > 0
+        and _is_calendar_driver(narrative_drivers[0])
+    )
+    non_calendar_drivers = [d for d in narrative_drivers if not _is_calendar_driver(d)]
+    all_calendar_fallback = not all_excluded_fallback and len(non_calendar_drivers) == 0
+
+    d1 = non_calendar_drivers[0] if len(non_calendar_drivers) > 0 else None
+    d2 = non_calendar_drivers[1] if len(non_calendar_drivers) > 1 else None
+    d3 = non_calendar_drivers[2] if len(non_calendar_drivers) > 2 else None
 
     # Sentence 2: primary and secondary driver
     if all_excluded_fallback:
         direction_word = "upward" if context == "above_base" else "downward"
         s2 = f"Recent binding activity is the primary driver, pushing probability {direction_word}."
+    elif all_calendar_fallback:
+        direction_word = "upward" if context == "above_base" else "downward"
+        s2 = (
+            f"Seasonal and time-of-day patterns are the primary driver, "
+            f"pushing probability {direction_word}."
+        )
+    elif calendar_was_top and d1:
+        # Calendar was top; lead with generic phrase, then name the first non-calendar driver.
+        # direction_suspect swap applies to d1 if it was also the absolute top driver.
+        direction_1 = "upward" if (d1["shap_value"] > 0 or direction_suspect) else "downward"
+        s2 = (
+            f"Seasonal and time-of-day patterns are the primary driver; "
+            f"followed by {d1['label']} ({d1['feature_value_context']}) pulling {direction_1}."
+        )
     elif d1:
-        direction_1 = "upward" if d1["shap_value"] > 0 else "downward"
+        # direction_suspect: top absolute SHAP driver has downward sign but high feature
+        # value — narrative direction swapped to "upward" to reflect likely true influence.
+        if direction_suspect and d1["shap_value"] < 0:
+            direction_1 = "upward"
+        else:
+            direction_1 = "upward" if d1["shap_value"] > 0 else "downward"
         s2_parts = [
             f"{d1['label']} ({d1['feature_value_context']}) is the primary driver, "
             f"pushing probability {direction_1}"
@@ -508,10 +636,13 @@ def generate_narrative(flowgate_id: str, datetime_utc: str | pd.Timestamp) -> st
         s2 = "No dominant drivers identified."
 
     # Sentence 3: third driver or summary
-    if not all_excluded_fallback and d3:
-        direction_3 = "elevated" if d3["shap_value"] > 0 else "suppressed"
+    # When calendar was top, d1/d2 are shifted by one vs the standard case,
+    # so use d2 for s3 to avoid repeating the d1 just used in s2.
+    s3_driver = d2 if calendar_was_top else d3
+    if not all_excluded_fallback and not all_calendar_fallback and s3_driver:
+        direction_3 = "elevated" if s3_driver["shap_value"] > 0 else "suppressed"
         s3 = (
-            f"Additionally, {d3['label']} ({d3['feature_value_context']}) "
+            f"Additionally, {s3_driver['label']} ({s3_driver['feature_value_context']}) "
             f"contributes to {direction_3} risk."
         )
     else:
